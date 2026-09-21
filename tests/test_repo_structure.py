@@ -133,6 +133,28 @@ class TestConfigFiles:
         for bad in ["build a quick profile", "what is your role", "your working hours"]:
             assert bad.lower() not in soul.lower(), f"profile-prompting leftover: {bad!r}"
 
+    def test_builtin_profile_offer_is_disabled_and_correctly_typed(self):
+        """The built-in first-contact directive must be OFF, and it must be the
+        STRING "off".
+
+        Hisham's first message asked him for a profile, because Hermes's built-in
+        onboarding directive competed with ours in SOUL.md and won. Turning it off
+        is a one-line config change — but unquoted `off` is YAML 1.1 boolean
+        False, and profile_build_mode() only matches the string "off", so the
+        unquoted form leaves the directive ACTIVE while looking correct. This test
+        pins the type, not just the presence.
+        """
+        import yaml
+        with open(os.path.join(REPO_ROOT, "config.yaml")) as f:
+            cfg = yaml.safe_load(f)
+        value = (cfg.get("onboarding") or {}).get("profile_build")
+        assert value == "off", (
+            f"onboarding.profile_build must be the string 'off', got {value!r} "
+            f"({type(value).__name__}) — quote it in YAML or the built-in "
+            "profile-offer directive stays active"
+        )
+        assert isinstance(value, str), "unquoted 'off' parses as boolean False and does nothing"
+
     def test_onboarding_says_composio_is_already_wired(self):
         """The SOUL tells Lola to store the key; config must already consume it,
         or the key would be saved and do nothing."""

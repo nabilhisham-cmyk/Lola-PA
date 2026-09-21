@@ -581,7 +581,16 @@ onboarding:
   seen:
     tool_progress_prompt: true
     busy_input_prompt: true
-  profile_build: ask
+  # 'off' disables Hermes's built-in first-contact directive, which tells the
+  # model to offer "build a short profile of you". That directive fought our own
+  # onboarding in SOUL.md and won: Hisham's first message asked him for a profile
+  # instead of connecting his accounts. Our onboarding is the correct one for this
+  # assistant, so the built-in offer is turned off rather than left to compete.
+  # NOTE: must be quoted. Unquoted 'off' is YAML 1.1 boolean False, and
+  # profile_build_mode() only matches the STRING "off" — so an unquoted value
+  # leaves the built-in profile offer active while looking correct. Verified by
+  # loading the real function and the real config.
+  profile_build: "off"
   # First-contact onboarding message — agent introduces itself and guides
   # the user through Composio setup (connect email/calendar/social accounts).
   # Set to false to disable the onboarding flow entirely.
