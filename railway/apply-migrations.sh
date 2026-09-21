@@ -90,5 +90,28 @@ PYEOF
   fi
 done
 
+# Inject secrets from the environment into config.yaml. Runs AFTER the volume is
+# seeded (00) and AFTER railway-init (03) has materialised credentials, and
+# BEFORE the gateway reads the config.
+#
+# WHY THIS IS HERE AND NOT IN THE MIGRATIONS LIST: the auxiliary lanes (vision,
+# web_extract, compression, ...) inherit credentials from model.api_key, and that
+# lookup reads config.yaml ONLY with no environment fallback. An env-only key
+# therefore leaves every aux lane sending an empty bearer token and getting
+#    401 {"error":{"message":"Unauthorized"}}
+# The main model is unaffected, because the provider path DOES read
+# OLLAMA_API_KEY from the environment, so the breakage is invisible except on the
+# aux lanes. Image reading was the visible symptom.
+INJECTOR="$SCRIPTS_DIR/inject-config-secrets.py"
+if [ -f "$INJECTOR" ]; then
+  if "$PY" "$INJECTOR"; then
+    log "secrets injected into config.yaml"
+  else
+    log "FAILED to inject secrets (non-fatal, boot continues)"
+  fi
+else
+  log "no inject-config-secrets.py shipped, skipping secret injection"
+fi
+
 log "schema sync complete"
 exit 0

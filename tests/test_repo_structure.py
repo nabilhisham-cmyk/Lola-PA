@@ -262,6 +262,40 @@ class TestConfigFiles:
         for f in ["supabase_events_migration_v2.sql", "supabase_events_migration_v3.sql"]:
             assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", f)), f"{f} missing"
 
+    def test_aux_lanes_can_inherit_credentials(self):
+        """Aux lanes (vision, web_extract, ...) get their key from model.api_key.
+
+        agent/auxiliary_client._read_main_field("api_key") reads config.yaml ONLY,
+        with no environment fallback. If model.api_key is absent, every aux lane
+        sends an empty bearer token and returns 401 Unauthorized — which is what
+        made image reading fail while the main model kept working.
+
+        So model.api_key must EXIST as an injection point, and the boot hook must
+        actually inject it from the environment.
+        """
+        import yaml
+        with open(os.path.join(REPO_ROOT, "config.yaml")) as fh:
+            cfg = yaml.safe_load(fh)
+        model = cfg.get("model") or {}
+        assert "api_key" in model, (
+            "model.api_key must exist as an injection point, or the auxiliary "
+            "lanes (including vision) authenticate with an empty token and 401"
+        )
+        aux = (cfg.get("auxiliary") or {}).get("vision") or {}
+        assert aux.get("provider"), "vision aux lane must declare a provider"
+
+        # The injector must be shipped and must run from the boot hook.
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
+            df = fh.read()
+        assert "inject-config-secrets.py" in df, "injector not shipped in the image"
+        assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "inject-config-secrets.py"))
+        with open(os.path.join(REPO_ROOT, "railway", "apply-migrations.sh")) as fh:
+            sh = fh.read()
+        assert "inject-config-secrets.py" in sh, "boot hook does not run the injector"
+        assert "OLLAMA_API_KEY" in open(
+            os.path.join(REPO_ROOT, "scripts", "inject-config-secrets.py")).read(), \
+            "injector must read the key from the environment"
+
     def test_stt_initial_prompt_is_configured(self):
         """Without it, whisper transcribed 'Hisham' as 'He sham' on a real
         recording, which in meeting minutes reads as a different person."""

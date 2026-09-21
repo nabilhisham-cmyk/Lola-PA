@@ -60,6 +60,12 @@ COPY scripts/supabase_events_migration_v3.sql /hermes/docker/railway-state/scrip
 COPY scripts/supabase_events_seed.sql /hermes/docker/railway-state/scripts/supabase_events_seed.sql
 COPY scripts/supabase_meetings_migration.sql /hermes/docker/railway-state/scripts/supabase_meetings_migration.sql
 COPY scripts/seed_events_data.py /hermes/docker/railway-state/scripts/seed_events_data.py
+# Writes secrets from the environment into config.yaml at boot. Needed because
+# the auxiliary lanes (vision, web_extract, compression, ...) inherit credentials
+# from model.api_key and that lookup has NO environment fallback, so an env-only
+# key leaves them sending an empty bearer token: 401 Unauthorized. The key is
+# never committed; it is injected at boot from the env var Railway already holds.
+COPY scripts/inject-config-secrets.py /hermes/docker/railway-state/scripts/inject-config-secrets.py
 COPY railway/railway-init.sh /hermes/railway-init.sh
 # Apply Railway-specific config override: home_mode must be "real" so
 # subprocess HOME=/opt/data (external CLIs find their credentials).

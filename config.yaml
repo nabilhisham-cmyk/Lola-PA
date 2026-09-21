@@ -2,6 +2,19 @@ model:
   default: deepseek-v4.1-flash
   provider: ollama-cloud
   base_url: https://ollama.com/v1
+  # NOTE: this must be a literal key, not an env reference. The AUXILIARY lanes
+  # (vision, web_extract, compression, and ten others) inherit credentials from
+  # here via agent/auxiliary_client._read_main_field("api_key"), which reads
+  # config.yaml ONLY and has NO environment fallback. With this field absent,
+  # every aux lane sent an empty bearer token and returned
+  #   401 {"error":{"message":"Unauthorized"}}
+  # which is what made image reading fail. The main model kept working because
+  # the provider path DOES read OLLAMA_API_KEY from the environment, so the
+  # breakage was invisible except on the aux lanes.
+  #
+  # The value is injected at deploy time from Railway, never committed:
+  # scripts/inject-config-secrets.py writes it before the gateway starts.
+  api_key: ''
 providers: {}
 fallback_providers:
 - provider: ollama-cloud
