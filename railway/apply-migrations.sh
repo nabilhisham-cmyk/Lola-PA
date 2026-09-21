@@ -138,6 +138,58 @@ else
   log "could not create $STT_MODEL_DIR (continuing)"
 fi
 
+# ── Deduplicate the Whisper model cache ────────────────────────────────────────
+# faster-whisper stores model.bin as a plain blob AND inside the HF cache tree
+# (models--.../blobs/ AND models--.../snapshots/). On a 5 GB volume, the 1.62 GB
+# model appears ~3 times = 4.86 GB, which fills the volume to 89%. Hard-linking
+# the duplicates reclaims ~3.2 GB without breaking the model load path.
+STT_DEDUPED=0
+if [ -d "$STT_MODEL_DIR/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo" ]; then
+  # Find large blobs (>100 MB) in the top-level blobs/ dir and hard-link
+  # matching files in the model tree, then remove the originals in the tree.
+  # This replaces N copies with 1 inode + N-1 hard links.
+  SNAP_DIR=""
+  for d in "$STT_MODEL_DIR/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/"*/; do
+    [ -d "$d" ] && SNAP_DIR="$d" && break
+  done
+  if [ -n "$SNAP_DIR" ] && [ -f "$SNAP_DIR/model.bin" ]; then
+    # model.bin in the snapshot should be a hard link to the blob, not a copy.
+    # Find the matching blob (same size, same content hash prefix) and hard-link it.
+    BLOB_SRC=""
+    for blob in "$STT_MODEL_DIR/blobs/"*/*; do
+      [ -f "$blob" ] || continue
+      # Compare by size first (much faster than checksum)
+      if [ "$(stat -c%s "$blob" 2>/dev/null)" = "$(stat -c%s "$SNAP_DIR/model.bin" 2>/dev/null)" ]; then
+        # Same size — check if they're already the same inode
+        if [ "$(stat -c%i "$blob" 2>/dev/null)" != "$(stat -c%i "$SNAP_DIR/model.bin" 2>/dev/null)" ]; then
+          BLOB_SRC="$blob"
+          break
+        fi
+      fi
+    done
+    if [ -n "$BLOB_SRC" ]; then
+      ln -f "$BLOB_SRC" "$SNAP_DIR/model.bin" 2>/dev/null && STT_DEDUPED=1
+    fi
+    # Also hard-link the snapshot's tokenizer and vocabulary against their blobs
+    for snap_file in "$SNAP_DIR"tokenizer.json "$SNAP_DIR"vocabulary.json; do
+      [ -f "$snap_file" ] || continue
+      for blob in "$STT_MODEL_DIR/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/blobs/"*; do
+        [ -f "$blob" ] || continue
+        if [ "$(stat -c%s "$blob" 2>/dev/null)" = "$(stat -c%s "$snap_file" 2>/dev/null)" ] && \
+           [ "$(stat -c%i "$blob" 2>/dev/null)" != "$(stat -c%i "$snap_file" 2>/dev/null)" ]; then
+          ln -f "$blob" "$snap_file" 2>/dev/null && STT_DEDUPED=1
+          break
+        fi
+      done
+    done
+  fi
+fi
+if [ "$STT_DEDUPED" -eq 1 ]; then
+  log "STT model cache deduplicated (hard-linked duplicate blobs)"
+else
+  log "STT model cache: no deduplication needed or possible"
+fi
+
 # Pre-fetch the model in the BACKGROUND so the first voice note is instant.
 # Deliberately not awaited: a 1.62 GB download must never delay the gateway, and
 # must never be able to block boot. If it fails, transcription still works and
