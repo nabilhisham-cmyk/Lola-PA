@@ -1,0 +1,168 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Hermes-PA Dockerfile for Railway
+# ──────────────────────────────────────────────────────────────────────────
+# Self-contained: clones Hermes Agent source from GitHub, overlays custom
+# configs from this repo, and builds. No need for the full Hermes source
+# tree on your local machine — just `railway up` from this repo.
+#
+# Pin a specific Hermes version by changing HERMES_REF to a commit SHA,
+# branch, or tag. Config drift is eliminated: root config.yaml/SOUL.md/
+# profiles/skills/plugins are copied directly into the image at build time,
+# with only home_mode overridden for Railway (sed in Stage 1).
+# ──────────────────────────────────────────────────────────────────────────
+
+ARG HERMES_REF=b5b8a4cd56cb75a563d8b40d998676b695748e64
+
+# ── Stage 1: Prepare source tree (clone Hermes + overlay custom configs) ───
+# HERMES_REF can be a branch name, tag, or commit SHA.
+# git clone --branch only accepts branch/tag names, so for SHAs we
+# clone the default branch then checkout the specific commit.
+FROM alpine/git:latest AS source
+ARG HERMES_REF
+RUN git clone https://github.com/NousResearch/hermes-agent.git /hermes && \
+    cd /hermes && \
+    git checkout "${HERMES_REF}" && \
+    git submodule update --init --recursive 2>/dev/null || true
+
+# Overlay custom configs from this repo onto the cloned source.
+# Instead of maintaining a separate railway-state/ directory (which drifts
+# from the root configs), we copy the root files directly and apply the
+# single Railway-specific override (home_mode: real) at build time.
+COPY config.yaml /hermes/docker/railway-state/config.yaml
+COPY SOUL.md /hermes/docker/railway-state/SOUL.md
+COPY profiles/ /hermes/docker/railway-state/profiles/
+COPY skills/ /hermes/docker/railway-state/skills/
+# Plugin must be at plugins/supabase/ (not plugins/memory/supabase/) because
+# Hermes scans $HERMES_HOME/plugins/<name>/ for user-installed memory providers.
+COPY plugins/memory/supabase/__init__.py /hermes/docker/railway-state/plugins/supabase/__init__.py
+COPY scripts/heartbeat.py /hermes/docker/railway-state/scripts/heartbeat.py
+COPY scripts/error-monitor.py /hermes/docker/railway-state/scripts/error-monitor.py
+COPY scripts/setup-cron-jobs.py /hermes/docker/railway-state/scripts/setup-cron-jobs.py
+COPY scripts/backup.py /hermes/docker/railway-state/scripts/backup.py
+COPY railway/railway-init.sh /hermes/railway-init.sh
+# Apply Railway-specific config override: home_mode must be "real" so
+# subprocess HOME=/opt/data (external CLIs find their credentials).
+RUN sed -i 's/^  home_mode: auto$/  home_mode: real/' /hermes/docker/railway-state/config.yaml
+
+# ── Stage 2: Build (reproduces upstream Dockerfile.railway) ────────────────
+# The upstream Dockerfile.railway can't be used directly because Railway
+# expects the Dockerfile in the repo root, not inside a cloned subdirectory.
+# Instead, we copy the prepared source tree and reproduce the build steps.
+# The upstream Dockerfile is ~370 lines and changes occasionally; to stay
+# in sync, pin HERMES_REF to a specific commit and update when needed.
+
+FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
+FROM node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732 AS node_source
+FROM debian:13.4
+
+ARG TARGETARCH
+ARG S6_OVERLAY_VERSION=3.2.1.0
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+
+# System deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg \
+    gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev procps \
+    git openssh-client docker-cli xz-utils \
+    pandoc weasyprint libsndfile1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# s6-overlay
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64)  arch="x86_64"  ;; \
+        arm64)  arch="aarch64" ;; \
+        *)      echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz" -o /tmp/s6-noarch.tar.xz && \
+    curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${arch}.tar.xz" -o /tmp/s6-arch.tar.xz && \
+    curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-symlinks-noarch.tar.xz" -o /tmp/s6-symlinks.tar.xz && \
+    tar -C / -Jxf /tmp/s6-noarch.tar.xz && \
+    tar -C / -Jxf /tmp/s6-arch.tar.xz && \
+    tar -C / -Jxf /tmp/s6-symlinks.tar.xz && \
+    rm -f /tmp/s6-*.tar.xz && \
+    ln -sf /init /usr/bin/tini
+
+# Non-root user for runtime; UID can be overridden via HERMES_UID at runtime
+RUN useradd -u 10000 -m -d /opt/data hermes
+
+# Python + Node tooling
+COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+COPY --chmod=0755 --from=node_source /usr/local/bin/node /usr/local/bin/
+COPY --from=node_source /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node_source /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    ln -sf /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+
+# Copy prepared Hermes source (cloned + overlaid in Stage 1)
+COPY --from=source /hermes/ /opt/hermes/
+WORKDIR /opt/hermes
+
+# Node deps + Playwright (chromium shell only for browser tool)
+ENV npm_config_install_links=false
+RUN npm install --prefer-offline --no-audit && \
+    npx playwright install --with-deps chromium --only-shell && \
+    npm cache clean --force
+
+# Python deps — match upstream extras (all + messaging + provider packages)
+RUN touch ./README.md && \
+    uv venv /opt/hermes/.venv --python 3.13 && \
+    uv sync --frozen --no-install-project --extra all --extra messaging \
+        --extra anthropic --extra bedrock --extra azure-identity \
+        --extra hindsight --extra matrix
+
+# Web + TUI build
+RUN cd web && npm run build && \
+    cd ../ui-tui && npm run build
+
+# Editable install of hermes-agent itself (deps already installed above)
+RUN uv pip install --no-cache-dir --no-deps -e "." && \
+    uv pip install --no-cache-dir fastembed faster-whisper && \
+    uv pip install --no-cache-dir langfuse
+
+# Permissions: make /opt/hermes immutable
+RUN mkdir -p /opt/hermes/bin && \
+    cp /opt/hermes/docker/hermes-exec-shim.sh /opt/hermes/bin/hermes && \
+    chmod 0755 /opt/hermes/bin/hermes && \
+    printf 'docker\n' > /opt/hermes/.install_method && \
+    chown -R root:root /opt/hermes && \
+    chmod -R a+rX /opt/hermes && \
+    chmod -R a-w /opt/hermes
+
+# s6-overlay service wiring
+COPY --from=source /hermes/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+RUN mkdir -p /etc/cont-init.d && \
+    printf '#!/command/with-contenv sh\nexec /opt/hermes/docker/stage2-hook.sh\n' \
+        > /etc/cont-init.d/01-hermes-setup && \
+    chmod +x /etc/cont-init.d/01-hermes-setup
+COPY --from=source /hermes/docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
+COPY --from=source /hermes/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
+
+# Runtime env
+ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
+ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
+ENV HERMES_HOME=/opt/data
+ENV HERMES_WRITE_SAFE_ROOT=/opt/data
+ENV HERMES_DISABLE_LAZY_INSTALLS=1
+ENV FASTEMBED_CACHE_PATH=/opt/data/.cache/fastembed
+ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
+
+RUN mkdir -p /opt/data
+
+# Railway: seed user state + boot init
+COPY --from=source --chown=hermes:hermes /hermes/docker/railway-state/ /opt/data/
+COPY --from=source --chown=hermes:hermes /hermes/docker/railway-state/ /opt/railway-seed/
+COPY railway/seed-volume.sh /opt/hermes/seed-volume.sh
+RUN chmod 0755 /opt/hermes/seed-volume.sh && \
+    printf '#!/command/with-contenv sh\nexec /opt/hermes/seed-volume.sh\n' > /etc/cont-init.d/00-railway-seed && \
+    chmod +x /etc/cont-init.d/00-railway-seed
+COPY --from=source --chmod=0755 /hermes/railway-init.sh /opt/hermes/railway-init.sh
+RUN printf '#!/command/with-contenv sh\nexec /opt/hermes/railway-init.sh\n' > /etc/cont-init.d/03-railway-init && chmod +x /etc/cont-init.d/03-railway-init
+
+ENTRYPOINT [ "/init", "/opt/hermes/docker/main-wrapper.sh" ]
+CMD [ "gateway", "run" ]

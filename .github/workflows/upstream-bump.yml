@@ -1,0 +1,66 @@
+name: Upstream Pin Bump
+
+# The original outage was a SURPRISE NousResearch image rebuild. HERMES_REF is
+# pinned to a commit SHA so rebuilds are reproducible; this workflow turns
+# upgrades into a deliberate, tested event: it opens a PR bumping HERMES_REF,
+# which then runs the full CI gate (build + seed smoke test) before you merge.
+#
+# NOTE: PRs opened with the default GITHUB_TOKEN do NOT trigger other workflows
+# (GitHub anti-recursion). To have CI auto-run on the bump PR, add a repo secret
+# GH_PAT (fine-grained PAT, contents+PR write). Without it, click "Re-run" on
+# the PR's checks (or push an empty commit) to run CI before merging.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest upstream commit
+        id: up
+        run: |
+          set -euo pipefail
+          LATEST=$(curl -fsSL -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/NousResearch/hermes-agent/commits/HEAD | jq -r .sha)
+          CURRENT=$(grep -oE 'ARG HERMES_REF=[0-9a-f]+' Dockerfile.railway | head -1 | cut -d= -f2)
+          echo "latest=$LATEST"   >> "$GITHUB_OUTPUT"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already on latest ($CURRENT)."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream moved: $CURRENT -> $LATEST"
+          fi
+
+      - name: Bump HERMES_REF
+        if: steps.up.outputs.changed == 'true'
+        run: |
+          sed -i "s/^ARG HERMES_REF=.*/ARG HERMES_REF=${{ steps.up.outputs.latest }}/" Dockerfile.railway
+
+      - name: Open PR
+        if: steps.up.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
+          branch: chore/bump-hermes-ref
+          delete-branch: true
+          commit-message: "chore: bump HERMES_REF to ${{ steps.up.outputs.latest }}"
+          title: "chore: bump HERMES_REF to ${{ steps.up.outputs.latest }}"
+          body: |
+            Automated upstream bump of **NousResearch/hermes-agent**.
+
+            - from `${{ steps.up.outputs.current }}`
+            - to   `${{ steps.up.outputs.latest }}`
+
+            CI (Docker build + seed-volume smoke test) must pass before merging.
+            Review upstream changes between these commits before approving.

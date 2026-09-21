@@ -1,0 +1,5 @@
+# events profile — inherits from default config, overrides only what differs.
+agent:
+  reasoning_effort: medium
+terminal:
+  timeout: 300

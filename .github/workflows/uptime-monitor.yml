@@ -1,0 +1,69 @@
+name: Uptime Monitor
+
+# Checks if the PA Template Telegram bot is responsive every 15 minutes.
+# Sends a Telegram alert to the owner if the bot is down.
+# Uses the Telegram Bot API getMe endpoint to verify the bot token is valid
+# and the bot is registered. Then sends a test message to verify delivery.
+#
+# NOTE: This checks that the Telegram bot token is valid and the Telegram
+# API is reachable. It does NOT verify the Railway container is running.
+# If the container is down, Telegram messages will queue but not be
+# delivered to the bot. To verify the container, use a heartbeat cron job
+# on the bot itself (see scripts/cron-jobs.md).
+#
+# To enable external container monitoring, expose the Hermes dashboard
+# publicly via Railway and add an HTTP health check here.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # daily at 06:00 UTC (09:00 Cairo) — reduced from every 15 minutes per owner request
+  workflow_dispatch:  # manual trigger for testing
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Telegram bot
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
+        run: |
+          set -eu
+
+          # 1. Verify bot token is valid
+          RESPONSE=$(curl -sf "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>&1) || {
+            echo "Bot token invalid or Telegram API unreachable: $RESPONSE"
+            exit 1
+          }
+
+          echo "Bot token valid: $(echo "$RESPONSE" | jq -r '.result.username')"
+
+          # 2. Send a heartbeat message to the bot's chat
+          # If the Railway container is running, the bot will receive this
+          # (it shows up as a queued message). If the container is down,
+          # the message queues on Telegram's side.
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          curl -sf "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}" \
+            -d "text=heartbeat: ${TIMESTAMP}" \
+            -d "parse_mode=Markdown" > /dev/null 2>&1 || {
+            echo "Failed to send heartbeat message"
+            exit 1
+          }
+
+          echo "Heartbeat sent at ${TIMESTAMP}"
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
+        run: |
+          # If the check failed, try to send an alert
+          # (this may also fail if Telegram API is down)
+          curl -sf "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}" \
+            -d "text=⚠️ PA Template uptime check FAILED at $(date -u +%Y-%m-%dT%H:%M:%SZ). Check Railway." \
+            -d "parse_mode=Markdown" > /dev/null 2>&1 || true
+
+          exit 1

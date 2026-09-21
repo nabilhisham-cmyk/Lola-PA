@@ -1,0 +1,135 @@
+name: CI
+
+# Gate for every change to main. With branch protection requiring these jobs,
+# code only reaches main (and therefore Railway's auto-deploy) after CI is green.
+# Replaces the old tests.yml (folded in) and deploy.yml (deploy is handled by
+# Railway's native GitHub integration once these checks pass — see README).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  config-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Validate config.yaml (model/provider/base_url present)
+        run: python scripts/validate_config.py
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml pytest
+      - run: python -m pytest tests/ -v
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so secrets in older commits are caught
+      - name: Run gitleaks
+        run: |
+          set -euo pipefail
+          VER=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name)
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/${VER}/gitleaks_${VER#v}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact -v
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Free disk space
+        run: |
+          # Reclaim ~7GB by removing pre-installed SDKs, languages, and Docker
+          # images that the runner ships with but this build doesn't need.
+          sudo rm -rf /usr/local/lib/android /usr/local/lib/node_modules \
+                      /usr/local/share/chromium /usr/local/share/vcpkg \
+                      /opt/ghc /opt/hostedtoolcache/CodeQL \
+                      /usr/share/dotnet /usr/local/.ghcup \
+                      2>/dev/null || true
+          docker system prune -af --volumes 2>/dev/null || true
+          sudo apt-get purge -y --auto-remove \
+            google-chrome-stable microsoft-edge-stable firefox \
+            2>/dev/null || true
+          df -h /
+      - name: Build Railway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.railway
+          load: true
+          tags: hermes-pa:ci
+          # No GHA cache — cache blobs consume 2-3GB and push the runner over
+          # the disk limit during export. The build is fast enough without it
+          # because the base images are already pulled by setup-buildx-action.
+      - name: Seed-volume smoke test (simulates a fresh empty Railway volume)
+        run: |
+          set -euo pipefail
+          # Use a Docker named volume — same shape as a Railway volume, and it
+          # avoids host bind-mount permission clashes (the seed script chowns
+          # /opt/data to uid 10000). All file ops run inside containers as root.
+          docker volume rm hermesdata >/dev/null 2>&1 || true
+          docker volume create hermesdata >/dev/null
+
+          echo "::group::first boot — empty /opt/data must be fully seeded"
+          docker run --rm -e HERMES_HOME=/opt/data -v hermesdata:/opt/data \
+            --entrypoint sh hermes-pa:ci /opt/hermes/seed-volume.sh
+          docker run --rm -v hermesdata:/opt/data --entrypoint sh hermes-pa:ci -c '
+            set -e
+            test -f /opt/data/config.yaml            || { echo "config.yaml NOT seeded"; exit 1; }
+            grep -q ollama-cloud /opt/data/config.yaml || { echo "model provider missing from seeded config"; exit 1; }
+            test -f /opt/data/SOUL.md                || { echo "SOUL.md NOT seeded"; exit 1; }
+            echo marker > /opt/data/runtime-state.txt
+          '
+          echo "::endgroup::"
+
+          echo "::group::second boot — existing runtime state must be preserved"
+          docker run --rm -e HERMES_HOME=/opt/data -v hermesdata:/opt/data \
+            --entrypoint sh hermes-pa:ci /opt/hermes/seed-volume.sh
+          docker run --rm -v hermesdata:/opt/data --entrypoint sh hermes-pa:ci -c '
+            test -f /opt/data/runtime-state.txt || { echo "runtime state was wiped on re-boot"; exit 1; }
+          '
+          echo "::endgroup::"
+
+          echo "::group::hybrid boot — config present but config-as-code dirs missing must be restored"
+          # Simulate a volume that has config.yaml + runtime state but lost
+          # profiles/plugins/scripts (the 2026-06-27 degraded-volume case).
+          docker run --rm -v hermesdata:/opt/data --entrypoint sh hermes-pa:ci -c '
+            rm -rf /opt/data/profiles /opt/data/plugins /opt/data/scripts
+          '
+          docker run --rm -e HERMES_HOME=/opt/data -v hermesdata:/opt/data \
+            --entrypoint sh hermes-pa:ci /opt/hermes/seed-volume.sh
+          docker run --rm -v hermesdata:/opt/data --entrypoint sh hermes-pa:ci -c '
+            set -e
+            test -d /opt/data/profiles                          || { echo "profiles/ NOT restored"; exit 1; }
+            test -f /opt/data/plugins/supabase/__init__.py      || { echo "supabase memory plugin NOT restored"; exit 1; }
+            test -f /opt/data/scripts/setup-cron-jobs.py        || { echo "cron setup script NOT restored"; exit 1; }
+            test -f /opt/data/runtime-state.txt                || { echo "runtime state lost during restore"; exit 1; }
+          '
+          echo "::endgroup::"
+
+          docker volume rm hermesdata >/dev/null 2>&1 || true
+          echo "seed-volume smoke test passed"
+      - name: Config loads inside the image
+        run: |
+          docker run --rm --entrypoint python hermes-pa:ci -c \
+            "import yaml; c=yaml.safe_load(open('/opt/railway-seed/config.yaml')); \
+             assert c['model']['default'] and c['model']['provider'] and c['model']['base_url']; \
+             print('config OK:', c['model']['default'], 'via', c['model']['provider'])"

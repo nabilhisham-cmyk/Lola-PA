@@ -1,0 +1,14 @@
+# pa profile — inherits from default config, overrides only what differs.
+agent:
+  reasoning_effort: medium
+terminal:
+  timeout: 300
+mcp_servers:
+  google-calendar:
+    command: npx
+    args:
+    - -y
+    - '@cocal/google-calendar-mcp'
+    env:
+      GOOGLE_OAUTH_CREDENTIALS: /opt/data/secrets/gcp-oauth.keys.json
+    enabled: true
