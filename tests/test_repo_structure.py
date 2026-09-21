@@ -107,7 +107,41 @@ class TestConfigFiles:
             actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
             assert actual == digest, f"{name} does not match its recorded checksum"
 
-    def test_events_migration_sql_exists(self):
+    def test_onboarding_guides_composio_and_addresses_hisham(self):
+        """Onboarding must connect his accounts, not ask him to fill in a profile.
+
+        The first version asked Hany's question ("build a quick profile?") and
+        addressed the user as "you" from Hany's perspective, so Lola would have
+        asked Hisham to describe his own role. This locks in the correct shape.
+        """
+        with open(os.path.join(REPO_ROOT, "SOUL.md")) as f:
+            soul = f.read()
+
+        # It must name Hisham as the person being onboarded.
+        assert "Hisham" in soul
+        # It must send him to Composio.
+        assert "composio.dev" in soul
+        assert "ck_" in soul, "must tell him the key prefix so he recognises it"
+        # It must say what connecting unlocks, in concrete terms.
+        for capability in ["calendar", "email", "run-sheet"]:
+            assert capability in soul.lower(), f"unlock list should mention {capability}"
+        # It must address the privacy worry.
+        assert "password" in soul.lower(), "must reassure that his password is not shared"
+
+        # It must NOT ask for a profile up front.
+        assert "Do NOT ask for a profile" in soul
+        for bad in ["build a quick profile", "what is your role", "your working hours"]:
+            assert bad.lower() not in soul.lower(), f"profile-prompting leftover: {bad!r}"
+
+    def test_onboarding_says_composio_is_already_wired(self):
+        """The SOUL tells Lola to store the key; config must already consume it,
+        or the key would be saved and do nothing."""
+        with open(os.path.join(REPO_ROOT, "config.yaml")) as f:
+            cfg = f.read()
+        assert "composio" in cfg
+        assert "MCP_COMPOSIO_API_KEY" in cfg, "config must read the key the SOUL tells him to send"
+
+    def test_skill_documents_the_same_status_values(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql"))
 
     def test_seed_script_exists(self):
