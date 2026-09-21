@@ -45,6 +45,9 @@ class TestConfigFiles:
     def test_events_migration_sql_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql"))
 
+    def test_seed_script_exists(self):
+        assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "seed_events_data.py"))
+
     def test_supabase_plugin_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "plugins", "memory", "supabase", "__init__.py"))
 

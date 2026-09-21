@@ -1,32 +1,44 @@
 #!/usr/bin/env python3
-"""Create cron jobs on the Hermes instance.
+"""Create Lola's cron jobs on the Hermes instance.
 
-Run this inside the Railway container (or locally) to ensure the
-morning briefing and heartbeat cron jobs exist.
+Run this inside the Railway container (or locally) to ensure the events
+briefing, heartbeat, error monitor and backup jobs exist.
 
 Usage:
   python3 scripts/setup-cron-jobs.py
 
-This is idempotent — it checks for existing jobs by name and only
-creates missing ones.
+This is idempotent: it checks for existing jobs by name and only creates the
+missing ones.
 """
 import json
 import os
 import subprocess
-import sys
+
+# The events briefing is the whole point of Lola: it is what Hisham sees every
+# morning, and it is what forces the event data to stay real. Everything else
+# here keeps the box alive.
+BRIEFING_PROMPT = (
+    "Build Hisham's daily events briefing for El Gouna. Call get-current-time "
+    "first, then query the Supabase events tables (load the events-ops skill for "
+    "the schema and the briefing order).\n\n"
+    "Report in this order, and skip a section with one line if it is empty:\n"
+    "1. TODAY: events live today, plus any event on site for setup or teardown today.\n"
+    "2. THIS WEEK: what is coming in the next 7 days, as 'Day DD Month - name - venue'.\n"
+    "3. AT RISK: from at_risk() - overdue or open critical tasks, permits not granted, "
+    "events with no confirmed venue. State the consequence, not just the fact.\n"
+    "4. CLASHES: run venue_clashes(0) and report any venue with overlapping windows, "
+    "including setup and teardown overlap.\n"
+    "5. CHASE LIST: suppliers or contacts expected to have replied and who have not.\n\n"
+    "If nothing is on today and nothing is at risk, say so in one line and stop. "
+    "Do not invent urgency. Dates always carry the weekday. "
+    "No em dashes. English."
+)
 
 JOBS = [
     {
-        "name": "morning-briefing",
-        "schedule": "0 7 * * *",
-        "prompt": (
-            "Good morning. Give me a concise daily briefing: "
-            "(1) Check today's calendar events using get-current-time then list-events. "
-            "(2) Flag anything that needs a decision or prep. "
-            "(3) Note any open GitHub PRs or failing CI on my repos. "
-            "(4) One line on weather in Cairo. "
-            "Keep it scannable — no filler. UK English."
-        ),
+        "name": "events-briefing",
+        "schedule": "0 7 * * *",  # 07:00 Africa/Cairo
+        "prompt": BRIEFING_PROMPT,
         "deliver": "origin",
     },
     {
@@ -49,11 +61,12 @@ JOBS = [
     },
 ]
 
+
 def run_cron_list():
-    """Return existing cron jobs (list of {name, id, ...}).
+    """Return existing cron jobs as a list of dicts.
 
     Reads the authoritative store at $HERMES_HOME/cron/jobs.json. NOTE: there is
-    no 'hermes cron list --json' flag — relying on it silently returned [], so
+    no 'hermes cron list --json' flag; relying on it silently returned [], so
     every run recreated all jobs and duplicates piled up. Reading the file is
     what actually makes this script idempotent.
     """
@@ -67,15 +80,9 @@ def run_cron_list():
     except Exception:
         return []
 
-def cron_job_exists(jobs, name):
-    """Check if a job with the given name exists."""
-    for job in jobs:
-        if job.get("name") == name:
-            return True
-    return False
 
 def create_cron_job(job):
-    """Create a single cron job via hermes CLI."""
+    """Create a single cron job via the hermes CLI."""
     cmd = ["hermes", "cron", "create", job["schedule"]]
 
     if job.get("no_agent"):
@@ -97,12 +104,12 @@ def create_cron_job(job):
         if result.returncode == 0:
             print(f"  Created: {job['name']}")
             return True
-        else:
-            print(f"  Failed to create {job['name']}: {result.stderr}")
-            return False
+        print(f"  Failed to create {job['name']}: {result.stderr}")
+        return False
     except Exception as e:
         print(f"  Error creating {job['name']}: {e}")
         return False
+
 
 def main():
     print("Checking existing cron jobs...")
@@ -121,6 +128,7 @@ def main():
             created += 1
 
     print(f"\nDone: {created} created, {skipped} skipped")
+
 
 if __name__ == "__main__":
     main()
