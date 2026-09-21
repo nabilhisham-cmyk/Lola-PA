@@ -238,7 +238,7 @@ class SupabaseMemoryProvider(MemoryProvider):
         # Adaptive-learning config (session-end extraction uses an Ollama model).
         self._ollama_base = (os.environ.get("OLLAMA_BASE_URL", "") or "https://ollama.com/v1").rstrip("/")
         self._ollama_key = os.environ.get("OLLAMA_API_KEY", "")
-        self._extract_model = os.environ.get("EXTRACT_MODEL", "gpt-oss:20b")
+        self._extract_model = os.environ.get("EXTRACT_MODEL", "deepseek-v4.1-flash")
         # Load standing rules for this persona into the system prompt.
         try:
             self._refresh_rules()

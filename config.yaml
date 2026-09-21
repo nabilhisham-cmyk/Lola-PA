@@ -1,12 +1,12 @@
 model:
-  default: glm-5.2
+  default: deepseek-v4.1-flash
   provider: ollama-cloud
   base_url: https://ollama.com/v1
 providers: {}
 fallback_providers:
-- provider: openai
-  model: gpt-5.2-mini
-  base_url: https://api.openai.com/v1
+- provider: ollama-cloud
+  model: deepseek-v4-pro:0813
+  base_url: https://ollama.com/v1
 credential_pool_strategies: {}
 toolsets:
 - hermes-cli
@@ -175,7 +175,7 @@ bedrock:
 auxiliary:
   vision:
     provider: ollama-cloud
-    model: qwen3-vl:235b-instruct
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 120
@@ -183,84 +183,84 @@ auxiliary:
     download_timeout: 30
   web_extract:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 360
     extra_body: {}
   compression:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 120
     extra_body: {}
   skills_hub:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 30
     extra_body: {}
   approval:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 30
     extra_body: {}
   mcp:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 30
     extra_body: {}
   title_generation:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 30
     extra_body: {}
   tts_audio_tags:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 30
     extra_body: {}
   triage_specifier:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 120
     extra_body: {}
   kanban_decomposer:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 180
     extra_body: {}
   profile_describer:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 60
     extra_body: {}
   curator:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 600
     extra_body: {}
   monitor:
     provider: ollama-cloud
-    model: gpt-oss:20b
+    model: deepseek-v4.1-flash
     base_url: https://ollama.com/v1
     api_key: ''
     timeout: 60
@@ -370,9 +370,14 @@ tts:
 stt:
   enabled: true
   provider: local
+  # 'turbo' is faster-whisper's name for large-v3-turbo
+  # (mobiuslabsgmbh/faster-whisper-large-v3-turbo). Kept as 'turbo' because that
+  # is the key faster-whisper itself exposes.
   local:
-    model: base
+    model: turbo
     language: ''
+    download_root: /opt/data/.cache/whisper
+    compute_type: int8
   openai:
     model: whisper-1
   mistral:
@@ -405,7 +410,7 @@ memory:
   nudge_interval: 10
   flush_min_turns: 6
 delegation:
-  model: gpt-oss:20b
+  model: deepseek-v4.1-flash
   provider: ollama-cloud
   base_url: https://ollama.com/v1
   api_key: ''
