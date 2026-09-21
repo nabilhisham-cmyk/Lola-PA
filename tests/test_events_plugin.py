@@ -201,6 +201,37 @@ class TestDsn:
         assert t.check_events_available() is True
 
 
+# ── value presentation ───────────────────────────────────────────────
+
+class TestCurfewFormatting:
+    """Postgres TIME serialises as '23:00:00'. A curfew is spoken as '23:00'."""
+
+    def _cur(self, value):
+        class C:
+            description = [("curfew_time",), ("name",)]
+            def fetchall(self):
+                return [(value, "Marina")]
+        return t._rows(C())
+
+    def test_trims_seconds_from_a_datetime_time(self):
+        """This is the real case: psycopg hands back datetime.time, not a string."""
+        import datetime as _dt
+        assert self._cur(_dt.time(23, 0))[0]["curfew_time"] == "23:00"
+
+    def test_keeps_a_real_number_of_seconds(self):
+        import datetime as _dt
+        assert self._cur(_dt.time(23, 30, 15))[0]["curfew_time"] == "23:30:15"
+
+    def test_also_handles_the_string_form(self):
+        assert self._cur("23:00:00")[0]["curfew_time"] == "23:00"
+
+    def test_handles_null(self):
+        assert self._cur(None)[0]["curfew_time"] is None
+
+    def test_leaves_other_columns_alone(self):
+        assert self._cur("23:00:00")[0]["name"] == "Marina"
+
+
 # ── enum guards ──────────────────────────────────────────────────────
 
 class TestEnumGuards:

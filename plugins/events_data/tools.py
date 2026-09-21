@@ -126,7 +126,21 @@ def _reject_unknown(table: str, fields: dict) -> Optional[str]:
 
 def _rows(cur) -> list[dict]:
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    out = []
+    for r in cur.fetchall():
+        row = dict(zip(cols, r))
+        # curfew_time is a Postgres TIME. psycopg returns a datetime.time, whose
+        # default str() is '23:00:00'. A curfew is spoken as '23:00', so trim the
+        # seconds when they are zero. Handle both the object and the string case,
+        # since a different driver or a future cast could hand back either.
+        ct = row.get("curfew_time")
+        if ct is not None:
+            if hasattr(ct, "strftime"):
+                row["curfew_time"] = ct.strftime("%H:%M" if ct.second == 0 else "%H:%M:%S")
+            elif isinstance(ct, str) and len(ct) == 8 and ct.endswith(":00"):
+                row["curfew_time"] = ct[:5]
+        out.append(row)
+    return out
 
 
 def _insert(cur, table: str, fields: dict, returning: str = "*") -> dict:
