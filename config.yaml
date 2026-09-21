@@ -378,6 +378,16 @@ stt:
     language: ''
     download_root: /opt/data/.cache/whisper
     compute_type: int8
+    # Biases whisper's spelling of names and local vocabulary. Without it a real
+    # test recording transcribed "Hisham" as "He sham", which in minutes reads as
+    # a different person. Read by tools/transcription_local.py into the
+    # WhisperModel call; it is NOT a transcribe_audio() argument.
+    initial_prompt: >-
+      El Gouna events meeting. Names and terms likely to appear: Hisham,
+      El Gouna, Abu Tig Marina, Hurghada, Orascom, Cairo, load in, get out,
+      curfew, rigging, staging, AV, kitesurf, windsurf, wakeboard, Sliders,
+      Mangroovy, Tamr Henna, run sheet, Kitemania, Windmania, Wakemania,
+      permits, sponsorship.
   openai:
     model: whisper-1
   mistral:

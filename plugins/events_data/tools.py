@@ -369,6 +369,88 @@ TASKS_SAVE_SCHEMA = _fn(
     },
 )
 
+WEATHER_CHECK_SCHEMA = _fn(
+    "weather_check",
+    "Wind and rain forecast for El Gouna over the next few days. Use this for "
+    "watersports events (they need wind in an operating window) and open-air "
+    "events (rain or high wind matters). Returns hourly wind in knots and rain "
+    "probability, plus a per-day summary. Says plainly when the forecast is "
+    "unavailable rather than guessing.",
+    {
+        "days": {"type": "integer", "description": "Days ahead, 1 to 7. Default 3."},
+        "date": {"type": "string", "description": "Optional YYYY-MM-DD to focus one day."},
+        "wind_min_knots": {"type": "integer", "description": "Optional operating minimum. If given, days below it are flagged as having no usable window."},
+        "wind_max_knots": {"type": "integer", "description": "Optional operating maximum. Hours above it are flagged."},
+    },
+)
+
+SERIES_LIST_SCHEMA = _fn(
+    "series_list",
+    "List recurring event series (weekly markets, daily pool parties, BBQ nights). "
+    "Use on_date to ask which series should be running on a particular day. "
+    "Check this before creating a one-off event that may already be a series.",
+    {
+        "on_date": {"type": "string", "description": "Optional YYYY-MM-DD. Only series running that day."},
+        "active_only": {"type": "boolean", "description": "Default true."},
+    },
+)
+
+SERIES_SAVE_SCHEMA = _fn(
+    "series_save",
+    "Create or update a recurring event series. recurrence is daily, weekly, "
+    "fortnightly, monthly, seasonal or custom. For weekly or fortnightly, give "
+    "weekday as 1=Monday to 7=Sunday.",
+    {
+        "name": {"type": "string", "description": "Series name. Required."},
+        "event_type": {"type": "string", "description": "Same vocabulary as events."},
+        "venue_id": {"type": "string", "description": "Confirmed venue UUID. Use venue_text if unconfirmed."},
+        "venue_text": {"type": "string", "description": "Venue name while unconfirmed."},
+        "recurrence": {"type": "string", "description": "daily | weekly | fortnightly | monthly | seasonal | custom"},
+        "weekday": {"type": "integer", "description": "1=Monday .. 7=Sunday, for weekly/fortnightly."},
+        "starts_on": {"type": "string", "description": "Season start YYYY-MM-DD."},
+        "ends_on": {"type": "string", "description": "Season end YYYY-MM-DD. Omit if open-ended."},
+        "attendance_typical": {"type": "integer", "description": "Typical attendance."},
+        "audience": {"type": "string", "description": "public | invited | ticket-holders | corporate | mixed"},
+        "permits_status": {"type": "string", "description": "unknown | not_started | applied | granted | refused"},
+        "weather_dependency": {"type": "string", "description": "none | rain_risk | rain_fatal | wind_required | wind_fatal"},
+        "active": {"type": "boolean", "description": "Default true."},
+        "notes": {"type": "string", "description": "Notes."},
+    },
+    ("name",),
+)
+
+APPROVALS_LIST_SCHEMA = _fn(
+    "approvals_list",
+    "Approval and permit steps. Either for one event, or all outstanding approvals "
+    "on events starting within a horizon. Use this to answer 'which sign-off is "
+    "missing and how long have we got'.",
+    {
+        "event_id": {"type": "string", "description": "Show every step for this event."},
+        "horizon_days": {"type": "integer", "description": "When no event_id, look this far ahead. Default 60."},
+    },
+)
+
+APPROVALS_SAVE_SCHEMA = _fn(
+    "approvals_save",
+    "Create or update one approval step on an event. A town-wide event usually "
+    "needs several: Orascom, the venue, an authority, police, civil defence, "
+    "tourism or maritime. Track each separately; do not collapse them into one "
+    "status.",
+    {
+        "approval_id": {"type": "string", "description": "Provide to update an existing step."},
+        "event_id": {"type": "string", "description": "Event it belongs to. Required when creating."},
+        "authority": {"type": "string", "description": "orascom | venue | authority | police | civil_defence | tourism | maritime | other"},
+        "authority_name": {"type": "string", "description": "The specific body or person."},
+        "status": {"type": "string", "description": "not_started | applied | in_review | granted | refused | expired"},
+        "applied_on": {"type": "string", "description": "YYYY-MM-DD."},
+        "decided_on": {"type": "string", "description": "YYYY-MM-DD."},
+        "expires_on": {"type": "string", "description": "YYYY-MM-DD."},
+        "reference": {"type": "string", "description": "Their reference number."},
+        "conditions": {"type": "string", "description": "Conditions attached to a grant."},
+        "notes": {"type": "string", "description": "Notes."},
+    },
+)
+
 
 # ── handlers: reads ──────────────────────────────────────────────────
 
@@ -707,3 +789,249 @@ def handle_tasks_save(args: dict) -> str:
     except Exception as e:
         logger.debug("tasks_save failed: %s", e)
         return _err(str(e))
+
+
+# ── handlers: recurring series ───────────────────────────────────────
+
+SERIES_COLS = {
+    "name", "event_type", "venue_id", "venue_text", "recurrence", "weekday",
+    "starts_on", "ends_on", "attendance_typical", "audience", "permits_status",
+    "weather_dependency", "active", "notes",
+}
+RECURRENCES = {"daily", "weekly", "fortnightly", "monthly", "seasonal", "custom"}
+WEATHER_DEPS = {"none", "rain_risk", "rain_fatal", "wind_required", "wind_fatal"}
+
+TABLES["event_series"] = SERIES_COLS
+
+
+def handle_series_list(args: dict) -> str:
+    on_date = args.get("on_date")
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            if on_date:
+                # series_on() resolves which recurrences actually fall on that day,
+                # including the weekday maths, instead of returning every series.
+                cur.execute(
+                    "SELECT *, %s::date AS on_date FROM series_on(%s::date)", (on_date, on_date)
+                )
+                return _ok(_rows(cur))
+            sql = "SELECT * FROM event_series WHERE TRUE"
+            params: list = []
+            if args.get("active_only", True):
+                sql += " AND active"
+            if args.get("name"):
+                sql += " AND name ILIKE %s"
+                params.append(f"%{args['name']}%")
+            sql += " ORDER BY name"
+            cur.execute(sql, params)
+            return _ok(_rows(cur))
+    except Exception as e:
+        logger.debug("series_list failed: %s", e)
+        return _err(str(e))
+
+
+def handle_series_save(args: dict) -> str:
+    err = _validate_enum(args.get("recurrence"), RECURRENCES, "recurrence")
+    if err:
+        return _err(err)
+    err = _validate_enum(args.get("weather_dependency"), WEATHER_DEPS, "weather_dependency")
+    if err:
+        return _err(err)
+    fields = {k: v for k, v in args.items() if v is not None and k in SERIES_COLS}
+    if not fields.get("name"):
+        return _err("name is required")
+    # A weekly series with no weekday would silently never match any date.
+    if fields.get("recurrence") in ("weekly", "fortnightly") and not fields.get("weekday"):
+        return _err("weekday (1=Monday .. 7=Sunday) is required for a weekly or "
+                    "fortnightly series, otherwise it never falls on a date")
+    wd = fields.get("weekday")
+    if wd is not None and not (isinstance(wd, int) and 1 <= wd <= 7):
+        return _err("weekday must be 1 (Monday) to 7 (Sunday)")
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            if args.get("series_id"):
+                row = _update(cur, "event_series", "id", args["series_id"], fields)
+                if not row:
+                    return _err(f"no series with id {args['series_id']}")
+            else:
+                row = _upsert_by_name(cur, "event_series", fields)
+            conn.commit()
+        return _ok({"series": row})
+    except Exception as e:
+        logger.debug("series_save failed: %s", e)
+        return _err(str(e))
+
+
+# ── handlers: approvals ──────────────────────────────────────────────
+
+APPROVAL_COLS = {
+    "event_id", "authority", "authority_name", "status", "applied_on",
+    "decided_on", "expires_on", "reference", "conditions", "notes",
+}
+APPROVAL_STATUS = {"not_started", "applied", "in_review", "granted", "refused", "expired"}
+TABLES["event_approvals"] = APPROVAL_COLS
+
+
+def handle_approvals_list(args: dict) -> str:
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            if args.get("event_id"):
+                cur.execute(
+                    "SELECT * FROM event_approvals WHERE event_id = %s "
+                    "ORDER BY status, authority", (args["event_id"],)
+                )
+                return _ok(_rows(cur))
+            horizon = int(args.get("horizon_days") or 60)
+            cur.execute("SELECT * FROM approvals_outstanding(%s)", (horizon,))
+            return _ok(_rows(cur))
+    except Exception as e:
+        logger.debug("approvals_list failed: %s", e)
+        return _err(str(e))
+
+
+def handle_approvals_save(args: dict) -> str:
+    err = _validate_enum(args.get("status"), APPROVAL_STATUS, "status")
+    if err:
+        return _err(err)
+    approval_id = args.get("approval_id")
+    fields = {k: v for k, v in args.items() if v is not None and k in APPROVAL_COLS}
+    if not approval_id:
+        if not fields.get("event_id"):
+            return _err("event_id is required when creating an approval step")
+        if not fields.get("authority"):
+            return _err("authority is required (orascom | venue | authority | police | "
+                        "civil_defence | tourism | maritime | other)")
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            if approval_id:
+                row = _update(cur, "event_approvals", "id", approval_id, fields)
+                if not row:
+                    return _err(f"no approval with id {approval_id}")
+            else:
+                row = _insert(cur, "event_approvals", fields)
+            conn.commit()
+            cur.execute("SELECT * FROM event_approvals WHERE id = %s", (row["id"],))
+            readback = _rows(cur)[0]
+        return _ok({"approval": readback})
+    except Exception as e:
+        logger.debug("approvals_save failed: %s", e)
+        return _err(str(e))
+
+
+# ── handlers: weather ────────────────────────────────────────────────
+
+# El Gouna, Egypt. Abu Tig Marina area; the town spans a few km so one point is
+# enough for a forecast that is already grid-scale.
+EL_GOUNA_LAT = 27.3952
+EL_GOUNA_LON = 33.6782
+KMH_PER_KNOT = 1.852
+
+
+def handle_weather_check(args: dict) -> str:
+    """Wind and rain for El Gouna, from Open-Meteo (free, no API key).
+
+    Wind is returned in KNOTS because that is the unit the watersports world
+    uses and the unit the operating windows on events are recorded in.
+    Open-Meteo reports km/h, so the conversion is explicit rather than assumed.
+    """
+    import urllib.request
+    import urllib.error
+
+    days = args.get("days") or 3
+    try:
+        days = max(1, min(7, int(days)))
+    except Exception:
+        days = 3
+    target = args.get("date")
+
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={EL_GOUNA_LAT}&longitude={EL_GOUNA_LON}"
+        "&hourly=wind_speed_10m,wind_gusts_10m,precipitation_probability,temperature_2m"
+        f"&forecast_days={days}&timezone=Africa%2FCairo"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "lola-events/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        # Say so plainly rather than guessing at a forecast.
+        return _err(
+            "Weather forecast is unavailable right now "
+            f"({type(e).__name__}). Do not estimate wind or rain; tell Hisham the "
+            "forecast could not be fetched."
+        )
+
+    hourly = data.get("hourly") or {}
+    times = hourly.get("time") or []
+    wind = hourly.get("wind_speed_10m") or []
+    gust = hourly.get("wind_gusts_10m") or []
+    rain = hourly.get("precipitation_probability") or []
+    temp = hourly.get("temperature_2m") or []
+
+    wmin, wmax = args.get("wind_min_knots"), args.get("wind_max_knots")
+
+    per_day: dict = {}
+    hours = []
+    for i, t in enumerate(times):
+        day = t[:10]
+        kmh = wind[i] if i < len(wind) else None
+        kn = round(kmh / KMH_PER_KNOT, 1) if kmh is not None else None
+        if target and day != target:
+            continue
+        rec = {
+            "time": t,
+            "wind_kn": kn,
+            "gust_kn": round(gust[i] / KMH_PER_KNOT, 1) if i < len(gust) and gust[i] is not None else None,
+            "rain_pct": rain[i] if i < len(rain) else None,
+            "temp_c": temp[i] if i < len(temp) else None,
+        }
+        hours.append(rec)
+        d = per_day.setdefault(day, {"date": day, "wind_kn": [], "rain_pct": [], "temp_c": []})
+        if kn is not None:
+            d["wind_kn"].append(kn)
+        if rec["rain_pct"] is not None:
+            d["rain_pct"].append(rec["rain_pct"])
+        if rec["temp_c"] is not None:
+            d["temp_c"].append(rec["temp_c"])
+
+    summary = []
+    for day, d in sorted(per_day.items()):
+        w = d["wind_kn"]
+        entry = {
+            "date": day,
+            "wind_min_kn": min(w) if w else None,
+            "wind_max_kn": max(w) if w else None,
+            "wind_avg_kn": round(sum(w) / len(w), 1) if w else None,
+            "rain_max_pct": max(d["rain_pct"]) if d["rain_pct"] else None,
+            "temp_range_c": [min(d["temp_c"]), max(d["temp_c"])] if d["temp_c"] else None,
+        }
+        # Flag against an operating window when one was supplied.
+        notes = []
+        if wmin is not None:
+            if not w or max(w) < wmin:
+                notes.append(f"no usable wind window: peak {entry['wind_max_kn']}kn "
+                             f"is below the {wmin}kn minimum")
+            else:
+                usable = [h for h in hours
+                          if h["time"][:10] == day and h["wind_kn"] is not None
+                          and h["wind_kn"] >= wmin
+                          and (wmax is None or h["wind_kn"] <= wmax)]
+                if usable:
+                    notes.append(f"{len(usable)} hour(s) inside the {wmin}"
+                                 + (f"-{wmax}" if wmax else "+") + "kn window")
+        if wmax is not None and w and max(w) > wmax:
+            notes.append(f"peak {entry['wind_max_kn']}kn exceeds the {wmax}kn maximum")
+        if entry["rain_max_pct"] is not None and entry["rain_max_pct"] >= 50:
+            notes.append(f"rain risk {entry['rain_max_pct']}%")
+        if notes:
+            entry["notes"] = notes
+        summary.append(entry)
+
+    return _ok({
+        "location": "El Gouna, Red Sea, Egypt",
+        "timezone": data.get("timezone", "Africa/Cairo"),
+        "source": "Open-Meteo",
+        "per_day": summary,
+        "hourly": hours,
+    })

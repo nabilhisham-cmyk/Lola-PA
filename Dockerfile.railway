@@ -40,6 +40,10 @@ COPY plugins/memory/supabase/__init__.py /hermes/docker/railway-state/plugins/su
 # Both files are needed: __init__.py registers the tools, tools.py holds them.
 COPY plugins/events_data/__init__.py /hermes/docker/railway-state/plugins/events_data/__init__.py
 COPY plugins/events_data/tools.py /hermes/docker/railway-state/plugins/events_data/tools.py
+# Meeting transcripts. Same layout rule as events_data: a general plugin keeps
+# its repo path under $HERMES_HOME/plugins/<name>/.
+COPY plugins/meetings/__init__.py /hermes/docker/railway-state/plugins/meetings/__init__.py
+COPY plugins/meetings/tools.py /hermes/docker/railway-state/plugins/meetings/tools.py
 COPY scripts/heartbeat.py /hermes/docker/railway-state/scripts/heartbeat.py
 COPY scripts/error-monitor.py /hermes/docker/railway-state/scripts/error-monitor.py
 COPY scripts/setup-cron-jobs.py /hermes/docker/railway-state/scripts/setup-cron-jobs.py

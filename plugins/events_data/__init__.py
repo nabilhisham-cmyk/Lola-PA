@@ -51,6 +51,11 @@ _TOOLS = (
     ("suppliers_save",   _t.SUPPLIERS_SAVE_SCHEMA,   _t.handle_suppliers_save,   "📦"),
     ("tasks_list",       _t.TASKS_LIST_SCHEMA,       _t.handle_tasks_list,       "✅"),
     ("tasks_save",       _t.TASKS_SAVE_SCHEMA,       _t.handle_tasks_save,       "📝"),
+    ("series_list",      _t.SERIES_LIST_SCHEMA,      _t.handle_series_list,      "🔁"),
+    ("series_save",      _t.SERIES_SAVE_SCHEMA,      _t.handle_series_save,      "🗓️"),
+    ("approvals_list",   _t.APPROVALS_LIST_SCHEMA,   _t.handle_approvals_list,   "📋"),
+    ("approvals_save",   _t.APPROVALS_SAVE_SCHEMA,   _t.handle_approvals_save,   "🖊️"),
+    ("weather_check",    _t.WEATHER_CHECK_SCHEMA,    _t.handle_weather_check,    "🌬️"),
 )
 
 

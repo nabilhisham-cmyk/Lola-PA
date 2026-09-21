@@ -163,8 +163,47 @@ class TestConfigFiles:
         assert "composio" in cfg
         assert "MCP_COMPOSIO_API_KEY" in cfg, "config must read the key the SOUL tells him to send"
 
-    def test_skill_documents_the_same_status_values(self):
-        assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql"))
+    def test_vocabulary_is_shared_between_soul_skill_and_sql(self):
+        """The status vocabulary must agree across the SOUL, the skill and the SQL.
+
+        NOTE: this test was previously named test_skill_documents_the_same_status_values
+        but its body had been clobbered to assert a file path, so it checked nothing.
+        Restored to actually compare the vocabulary it claims to.
+        """
+        sql = open(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql")).read()
+        skill = open(os.path.join(REPO_ROOT, "skills", "events-ops", "SKILL.md")).read()
+        for value in ["proposed", "confirmed", "in_production", "live", "completed", "cancelled"]:
+            assert value in sql, f"event status {value} missing from the SQL"
+            assert value in skill, f"event status {value} missing from the skill"
+
+    def test_meetings_plugin_exists_and_is_shipped(self):
+        """The meetings plugin is useless if the image never copies it."""
+        for f in ["__init__.py", "tools.py"]:
+            assert os.path.isfile(os.path.join(REPO_ROOT, "plugins", "meetings", f)), \
+                f"plugins/meetings/{f} missing"
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
+            df = fh.read()
+        assert "plugins/meetings/__init__.py" in df, "meetings __init__ not copied"
+        assert "plugins/meetings/tools.py" in df, "meetings tools not copied"
+
+    def test_meetings_migration_exists(self):
+        assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_meetings_migration.sql"))
+
+    def test_v2_and_v3_event_migrations_exist(self):
+        for f in ["supabase_events_migration_v2.sql", "supabase_events_migration_v3.sql"]:
+            assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", f)), f"{f} missing"
+
+    def test_stt_initial_prompt_is_configured(self):
+        """Without it, whisper transcribed 'Hisham' as 'He sham' on a real
+        recording, which in meeting minutes reads as a different person."""
+        import yaml
+        with open(os.path.join(REPO_ROOT, "config.yaml")) as fh:
+            cfg = yaml.safe_load(fh)
+        local = ((cfg.get("stt") or {}).get("local") or {})
+        assert local.get("model") == "turbo", "STT model should be whisper turbo"
+        prompt = local.get("initial_prompt")
+        assert isinstance(prompt, str) and "Hisham" in prompt, \
+            "stt.local.initial_prompt must name Hisham, or his name mis-transcribes"
 
     def test_seed_script_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "seed_events_data.py"))
