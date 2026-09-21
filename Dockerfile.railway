@@ -190,6 +190,15 @@ RUN mkdir -p /etc/cont-init.d && \
     chmod +x /etc/cont-init.d/01-hermes-setup
 COPY --from=source /hermes/docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
 COPY --from=source /hermes/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
+# s6 runs every /etc/cont-init.d/* in name order and a non-executable file exits
+# 126 SILENTLY: it appears in the log as "exited 126" and nothing else fails.
+# 015-supervise-perms shipped with git mode 100644 (not executable) upstream, so
+# it had never actually run — observed as:
+#   /etc/cont-init.d/015-supervise-perms: Permission denied
+#   cont-init: info: /etc/cont-init.d/015-supervise-perms exited 126
+# The file's own mode is fixed in git, and this explicit chmod is belt and braces
+# so a future re-vendor with the wrong mode cannot silently disable it again.
+RUN chmod +x /etc/cont-init.d/*
 
 # Runtime env
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist

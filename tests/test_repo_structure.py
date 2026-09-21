@@ -202,6 +202,36 @@ class TestConfigFiles:
                   "seed_events_data.py"]:
             assert f"scripts/{f}" in df, f"{f} is not shipped in the image"
 
+    def test_cont_init_scripts_are_executable(self):
+        """A non-executable cont-init script exits 126 SILENTLY.
+
+        s6 runs /etc/cont-init.d/* in name order. If a file is not executable it
+        logs "exited 126" and nothing else fails, so a boot hook can be dead for
+        months without anyone noticing. 015-supervise-perms shipped that way: git
+        mode 100644 in the fork's upstream commit, fixed here by setting the mode
+        (blob content untouched) plus an explicit chmod in the Dockerfile.
+        """
+        import subprocess
+        out = subprocess.run(
+            ["git", "ls-files", "-s", "docker/cont-init.d/"],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        ).stdout
+        assert out.strip(), "no cont-init scripts tracked"
+        offenders = []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[0] != "100755":
+                offenders.append(parts[3])
+        assert not offenders, (
+            "these cont-init scripts are not executable in git and will exit 126: "
+            f"{offenders}"
+        )
+        # And the Dockerfile must not rely on the mode alone.
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
+            df = fh.read()
+        assert "chmod +x /etc/cont-init.d/*" in df, \
+            "Dockerfile should force the executable bit on cont-init scripts"
+
     def test_boot_applies_migrations(self):
         """And something must actually apply them, after credentials exist."""
         with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
