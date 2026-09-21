@@ -42,6 +42,29 @@ class TestConfigFiles:
     def test_migration_sql_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_migration.sql"))
 
+    def test_events_plugin_exists(self):
+        for f in ["__init__.py", "tools.py"]:
+            assert os.path.isfile(os.path.join(REPO_ROOT, "plugins", "events_data", f)), \
+                f"plugins/events_data/{f} missing"
+
+    def test_dockerfile_ships_the_events_plugin(self):
+        """The plugin is useless if the image never copies it. Both files must be
+        COPYed, and psycopg must be installed, or the tools fail at runtime."""
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as f:
+            df = f.read()
+        assert "plugins/events_data/__init__.py" in df, "events plugin __init__ not copied"
+        assert "plugins/events_data/tools.py" in df, "events plugin tools not copied"
+        assert "psycopg" in df, "psycopg must be installed for the events plugin to connect"
+
+    def test_events_briefing_cron_is_domain_specific(self):
+        """The briefing must be about events, not the generic template text."""
+        with open(os.path.join(REPO_ROOT, "scripts", "setup-cron-jobs.py")) as f:
+            src = f.read()
+        assert "events-briefing" in src
+        assert "venue_clashes" in src and "at_risk" in src
+        for stale in ["open GitHub PRs", "weather in Cairo", "your city"]:
+            assert stale not in src, f"template leftover still present: {stale!r}"
+
     def test_events_migration_sql_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql"))
 

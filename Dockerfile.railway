@@ -35,6 +35,11 @@ COPY skills/ /hermes/docker/railway-state/skills/
 # Plugin must be at plugins/supabase/ (not plugins/memory/supabase/) because
 # Hermes scans $HERMES_HOME/plugins/<name>/ for user-installed memory providers.
 COPY plugins/memory/supabase/__init__.py /hermes/docker/railway-state/plugins/supabase/__init__.py
+# The events data layer. Unlike the memory provider above, this is a general
+# plugin and keeps its repo layout, so it lands in $HERMES_HOME/plugins/events_data/.
+# Both files are needed: __init__.py registers the tools, tools.py holds them.
+COPY plugins/events_data/__init__.py /hermes/docker/railway-state/plugins/events_data/__init__.py
+COPY plugins/events_data/tools.py /hermes/docker/railway-state/plugins/events_data/tools.py
 COPY scripts/heartbeat.py /hermes/docker/railway-state/scripts/heartbeat.py
 COPY scripts/error-monitor.py /hermes/docker/railway-state/scripts/error-monitor.py
 COPY scripts/setup-cron-jobs.py /hermes/docker/railway-state/scripts/setup-cron-jobs.py
@@ -123,7 +128,10 @@ RUN cd web && npm run build && \
 # Editable install of hermes-agent itself (deps already installed above)
 RUN uv pip install --no-cache-dir --no-deps -e "." && \
     uv pip install --no-cache-dir fastembed faster-whisper && \
-    uv pip install --no-cache-dir langfuse
+    uv pip install --no-cache-dir langfuse psycopg[binary]
+# psycopg is what the events plugin uses to reach the Supabase Postgres tables.
+# It is NOT installed by the events plugin itself (plugins must not install
+# dependencies at runtime), so it is pinned here with the other extras.
 
 # Permissions: make /opt/hermes immutable
 RUN mkdir -p /opt/hermes/bin && \
