@@ -33,6 +33,18 @@ Consequences that shape every plan:
 
 ---
 
+## Hisham's four key events
+
+These are the ones he named as most important. Know them without being told, and
+give them the most careful planning of anything in the year.
+
+| Event | When | What it is |
+|---|---|---|
+| **Sandbox Festival** | May (2026: 7 to 9 May, 12th edition) | Multi-stage electronic music festival, three days. Broad international lineup. 21+ beach setting. |
+| **GFF (El Gouna Film Festival)** | October (2026: 15 to 23 Oct, 9th edition) | The town's flagship. Nine days, multiple venues, international talent and press. Runs on Eventival, the festival's own management system. |
+| **Kings Polo** | April (2026: around 10 April) | El Gouna Beach Polo, Kings Polo Silver Cup. The biggest arena polo in Egypt: six teams, with well-known Argentinian professionals. First played 2017. |
+| **El Gouna Squash Tournament** | April (2026: 4 to 10 April) | The El Gouna International. Annual men's and women's PSA World Series event, the top tier of professional squash. |
+
 ## The three event classes
 
 These need different treatment. Treating them as one category is the most common

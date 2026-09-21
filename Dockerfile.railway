@@ -48,6 +48,18 @@ COPY scripts/heartbeat.py /hermes/docker/railway-state/scripts/heartbeat.py
 COPY scripts/error-monitor.py /hermes/docker/railway-state/scripts/error-monitor.py
 COPY scripts/setup-cron-jobs.py /hermes/docker/railway-state/scripts/setup-cron-jobs.py
 COPY scripts/backup.py /hermes/docker/railway-state/scripts/backup.py
+# Schema and seed SQL, plus the importer. These were previously NOT shipped, so
+# the running container could not reproduce its own database: if the Supabase
+# project were rebuilt, or a second environment stood up, or a table dropped, the
+# migrations existed only in git and on a laptop. Data survives in Supabase
+# across restarts, but the SCHEMA is the thing a volume cannot give back.
+COPY scripts/supabase_migration.sql /hermes/docker/railway-state/scripts/supabase_migration.sql
+COPY scripts/supabase_events_migration.sql /hermes/docker/railway-state/scripts/supabase_events_migration.sql
+COPY scripts/supabase_events_migration_v2.sql /hermes/docker/railway-state/scripts/supabase_events_migration_v2.sql
+COPY scripts/supabase_events_migration_v3.sql /hermes/docker/railway-state/scripts/supabase_events_migration_v3.sql
+COPY scripts/supabase_events_seed.sql /hermes/docker/railway-state/scripts/supabase_events_seed.sql
+COPY scripts/supabase_meetings_migration.sql /hermes/docker/railway-state/scripts/supabase_meetings_migration.sql
+COPY scripts/seed_events_data.py /hermes/docker/railway-state/scripts/seed_events_data.py
 COPY railway/railway-init.sh /hermes/railway-init.sh
 # Apply Railway-specific config override: home_mode must be "real" so
 # subprocess HOME=/opt/data (external CLIs find their credentials).
@@ -199,6 +211,14 @@ RUN chmod 0755 /opt/hermes/seed-volume.sh && \
     chmod +x /etc/cont-init.d/00-railway-seed
 COPY --from=source --chmod=0755 /hermes/railway-init.sh /opt/hermes/railway-init.sh
 RUN printf '#!/command/with-contenv sh\nexec /opt/hermes/railway-init.sh\n' > /etc/cont-init.d/03-railway-init && chmod +x /etc/cont-init.d/03-railway-init
+# 04: bring the Supabase schema up to date with the image. Runs AFTER the volume
+# is seeded (00) and AFTER railway-init (03) has materialised credentials, and
+# BEFORE the gateway. Non-fatal by design: a boot with a stale schema beats a
+# boot that refuses to start.
+COPY railway/apply-migrations.sh /opt/hermes/apply-migrations.sh
+RUN chmod 0755 /opt/hermes/apply-migrations.sh && \
+    printf '#!/command/with-contenv sh\nexec /opt/hermes/apply-migrations.sh\n' > /etc/cont-init.d/04-apply-migrations && \
+    chmod +x /etc/cont-init.d/04-apply-migrations
 
 ENTRYPOINT [ "/init", "/opt/hermes/docker/main-wrapper.sh" ]
 CMD [ "gateway", "run" ]

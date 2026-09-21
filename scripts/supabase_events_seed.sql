@@ -113,3 +113,28 @@ SELECT * FROM (VALUES
 WHERE NOT EXISTS (
     SELECT 1 FROM events e WHERE e.name = v.name AND e.starts_on = v.starts_on
 );
+
+-- ── Hisham's four key events (named by him directly) ─────────────────
+-- These are the ones he cares about most. Health-checked against the real
+-- calendar: Sandbox May, Kings Polo and Squash April, GFF October.
+INSERT INTO events
+  (name, event_type, status, starts_on, ends_on, venue_text,
+   weather_dependency, description, source)
+SELECT * FROM (VALUES
+ ('Sandbox Festival 2026', 'festival', 'confirmed',
+  DATE '2026-05-07', DATE '2026-05-09', 'El Gouna beach', 'rain_fatal',
+  'KEY EVENT. Multi-stage electronic music festival, three days, broad international lineup, 21+ beach setting. 12th edition. Organiser is external; El Gouna supplies the town.',
+  'seed'),
+ ('Kings Polo 2026 (Beach Polo Silver Cup)', 'sporting', 'proposed',
+  DATE '2026-04-10', DATE '2026-04-10', 'El Gouna beach', 'wind_fatal',
+  'KEY EVENT. El Gouna Beach Polo Kings Polo Silver Cup, the biggest arena polo in Egypt. Six teams with well-known Argentinian professionals. First played 2017, paused over COVID. Wind is a genuine risk for arena polo.',
+  'seed'),
+ ('El Gouna International Squash Open 2026', 'sporting', 'confirmed',
+  DATE '2026-04-04', DATE '2026-04-10', 'El Gouna Conference and Culture Center', 'none',
+  'KEY EVENT. Annual men''s and women''s PSA World Series squash tournament, the top tier of professional squash. Indoor, so weather-independent.',
+  'seed')
+) AS v(name, event_type, status, starts_on, ends_on, venue_text,
+       weather_dependency, description, source)
+WHERE NOT EXISTS (
+    SELECT 1 FROM events e WHERE e.name = v.name AND e.starts_on = v.starts_on
+);

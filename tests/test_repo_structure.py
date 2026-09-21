@@ -186,6 +186,38 @@ class TestConfigFiles:
         assert "plugins/meetings/__init__.py" in df, "meetings __init__ not copied"
         assert "plugins/meetings/tools.py" in df, "meetings tools not copied"
 
+    def test_schema_files_are_shipped_in_the_image(self):
+        """The container must be able to reproduce its own database.
+
+        Data survives a restart inside Supabase, but the SCHEMA definition is the
+        one thing a volume cannot give back. These were previously absent from the
+        image, so a rebuilt Supabase project or a second environment could not be
+        stood up from the deployed artefact.
+        """
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
+            df = fh.read()
+        for f in ["supabase_migration.sql", "supabase_events_migration.sql",
+                  "supabase_events_migration_v2.sql", "supabase_events_migration_v3.sql",
+                  "supabase_meetings_migration.sql", "supabase_events_seed.sql",
+                  "seed_events_data.py"]:
+            assert f"scripts/{f}" in df, f"{f} is not shipped in the image"
+
+    def test_boot_applies_migrations(self):
+        """And something must actually apply them, after credentials exist."""
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as fh:
+            df = fh.read()
+        assert "apply-migrations.sh" in df, "boot hook not wired"
+        # cont-init ordering: 04 runs after 00 (seed volume) and 03 (railway-init).
+        assert "04-apply-migrations" in df
+        assert os.path.isfile(os.path.join(REPO_ROOT, "railway", "apply-migrations.sh"))
+
+    def test_boot_hook_is_never_fatal(self):
+        """A stale schema at boot beats a boot that refuses to start."""
+        with open(os.path.join(REPO_ROOT, "railway", "apply-migrations.sh")) as fh:
+            sh = fh.read()
+        assert "non-fatal, boot continues" in sh
+        assert sh.rstrip().endswith("exit 0"), "hook must always exit 0"
+
     def test_meetings_migration_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_meetings_migration.sql"))
 
@@ -204,6 +236,22 @@ class TestConfigFiles:
         prompt = local.get("initial_prompt")
         assert isinstance(prompt, str) and "Hisham" in prompt, \
             "stt.local.initial_prompt must name Hisham, or his name mis-transcribes"
+
+    def test_identity_is_known_and_never_asked(self):
+        """Hisham's identity and key events must be in the SOUL, not discovered
+        by asking him. He was shown 'can I build a profile of you', which is both
+        redundant and impersonal: Lola already knows exactly who he is."""
+        soul = open(os.path.join(REPO_ROOT, "SOUL.md")).read()
+        for fact in ["Hisham Nabil", "Orascom", "Sandbox", "GFF",
+                     "Kings Polo", "Squash"]:
+            assert fact in soul, f"{fact} must be in the concierge SOUL"
+        assert "Never ask him for any of this" in soul or "never ask" in soul.lower()
+        assert "never offer to" in soul.lower() or "Never offer" in soul
+
+    def test_key_events_are_seeded(self):
+        seed = open(os.path.join(REPO_ROOT, "scripts", "supabase_events_seed.sql")).read()
+        for ev in ["Sandbox Festival", "Kings Polo", "Squash Open"]:
+            assert ev in seed, f"{ev} missing from the seed"
 
     def test_seed_script_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "seed_events_data.py"))
