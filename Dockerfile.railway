@@ -111,9 +111,21 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && 
 COPY --from=source /hermes/ /opt/hermes/
 WORKDIR /opt/hermes
 
-# Node deps + Playwright (chromium shell only for browser tool)
+# Node deps + Playwright (chromium shell only for browser tool).
+#
+# Deliberately NOT a bare `npm install`. At the repo root that installs every
+# workspace in the tree, including apps/desktop, whose Electron postinstall
+# downloads a prebuilt binary from GitHub. That download returned 500 and failed
+# the build at stage 12/27. Lola is a Telegram assistant: it needs the root
+# package (for Playwright, used by the browser tool), web, and ui-tui. It does
+# not need the Electron desktop app.
+#
+# --workspaces=false installs ONLY the root package.json, which is upstream's own
+# documented way to do this (see the install:root script).
 ENV npm_config_install_links=false
-RUN npm install --prefer-offline --no-audit && \
+RUN npm install --workspaces=false --prefer-offline --no-audit && \
+    npm install --workspace web --prefer-offline --no-audit && \
+    npm install --workspace ui-tui --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
     npm cache clean --force
 
