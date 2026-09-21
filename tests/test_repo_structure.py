@@ -231,6 +231,13 @@ class TestConfigFiles:
             df = fh.read()
         assert "chmod +x /etc/cont-init.d/*" in df, \
             "Dockerfile should force the executable bit on cont-init scripts"
+        # And use upstream's own mechanism for the two it COPYs from source.
+        # Upstream's Dockerfile does `COPY --chmod=0755` for both; the fork used a
+        # plain COPY, so the mode came from the source file and 015 landed
+        # non-executable. Matching upstream is the fix.
+        for f in ["015-supervise-perms", "02-reconcile-profiles"]:
+            assert f"--chmod=0755 /hermes/docker/cont-init.d/{f}" in df, \
+                f"{f} must be COPYed with --chmod=0755, as upstream does"
 
     def test_boot_applies_migrations(self):
         """And something must actually apply them, after credentials exist."""

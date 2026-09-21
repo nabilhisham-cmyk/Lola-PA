@@ -188,8 +188,14 @@ RUN mkdir -p /etc/cont-init.d && \
     printf '#!/command/with-contenv sh\nexec /opt/hermes/docker/stage2-hook.sh\n' \
         > /etc/cont-init.d/01-hermes-setup && \
     chmod +x /etc/cont-init.d/01-hermes-setup
-COPY --from=source /hermes/docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
-COPY --from=source /hermes/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
+# Use --chmod=0755, matching upstream's own Dockerfile exactly. The fork used a
+# plain COPY, which takes the mode from the source file, and this file's git mode
+# was 100644 — so it landed non-executable and s6 reported a silent
+# "exited 126 ... Permission denied" on every boot, meaning the hook had never
+# run. Upstream avoids this with --chmod=0755 on the COPY; we now do the same
+# rather than inventing a variant.
+COPY --from=source --chmod=0755 /hermes/docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
+COPY --from=source --chmod=0755 /hermes/docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
 # s6 runs every /etc/cont-init.d/* in name order and a non-executable file exits
 # 126 SILENTLY: it appears in the log as "exited 126" and nothing else fails.
 # 015-supervise-perms shipped with git mode 100644 (not executable) upstream, so
@@ -198,6 +204,8 @@ COPY --from=source /hermes/docker/cont-init.d/02-reconcile-profiles /etc/cont-in
 #   cont-init: info: /etc/cont-init.d/015-supervise-perms exited 126
 # The file's own mode is fixed in git, and this explicit chmod is belt and braces
 # so a future re-vendor with the wrong mode cannot silently disable it again.
+# Belt and braces: any future cont-init script added without the right mode
+# still gets one. --chmod above is the primary fix.
 RUN chmod +x /etc/cont-init.d/*
 
 # Runtime env
