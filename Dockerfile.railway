@@ -76,23 +76,32 @@ RUN apt-get update && \
     pandoc weasyprint libsndfile1 && \
     rm -rf /var/lib/apt/lists/*
 
-# s6-overlay
+# s6-overlay: process supervisor, installed from VENDORED tarballs.
+#
+# This used to fetch the three tarballs from GitHub's release CDN at build time.
+# That cost five failed deploys: the CDN returned 504 on every attempt, and
+# because the fetches were chained with && and -f, one bad response aborted the
+# whole build. Adding --retry did NOT help: a later build logged SIX consecutive
+# 504s, all retries exhausted. The CDN is not reachable from Railway's builders
+# reliably enough to depend on.
+#
+# The tarballs are now committed under docker/vendor/s6-overlay/, so the build
+# needs no network for this step at all. Same version, same bytes, verified by
+# SHA256 below so a corrupted or substituted vendor file fails loudly.
+ARG S6_OVERLAY_VERSION=3.2.1.0
+COPY docker/vendor/s6-overlay/ /tmp/s6-vendor/
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
         amd64)  arch="x86_64"  ;; \
         arm64)  arch="aarch64" ;; \
         *)      echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;; \
     esac; \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
-        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz" -o /tmp/s6-noarch.tar.xz && \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
-        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${arch}.tar.xz" -o /tmp/s6-arch.tar.xz && \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
-        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-symlinks-noarch.tar.xz" -o /tmp/s6-symlinks.tar.xz && \
-    tar -C / -Jxf /tmp/s6-noarch.tar.xz && \
-    tar -C / -Jxf /tmp/s6-arch.tar.xz && \
-    tar -C / -Jxf /tmp/s6-symlinks.tar.xz && \
-    rm -f /tmp/s6-*.tar.xz && \
+    cd /tmp/s6-vendor; \
+    sha256sum -c SHA256SUMS; \
+    tar -C / -Jxf "s6-overlay-noarch.tar.xz"; \
+    tar -C / -Jxf "s6-overlay-${arch}.tar.xz"; \
+    tar -C / -Jxf "s6-overlay-symlinks-noarch.tar.xz"; \
+    rm -rf /tmp/s6-vendor; \
     ln -sf /init /usr/bin/tini
 
 # Non-root user for runtime; UID can be overridden via HERMES_UID at runtime

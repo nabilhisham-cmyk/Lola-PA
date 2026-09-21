@@ -65,6 +65,48 @@ class TestConfigFiles:
         for stale in ["open GitHub PRs", "weather in Cairo", "your city"]:
             assert stale not in src, f"template leftover still present: {stale!r}"
 
+    def test_s6_overlay_is_vendored_not_fetched(self):
+        """The build must not depend on GitHub's release CDN.
+
+        Five deploys failed on a 504 fetching these three tarballs, and --retry
+        did not help (six consecutive 504s, all retries exhausted). The fix was
+        to vendor them. If someone reintroduces a curl for s6-overlay, this
+        catches it before it costs another deploy.
+        """
+        with open(os.path.join(REPO_ROOT, "Dockerfile.railway")) as f:
+            df = f.read()
+        # Look for a curl INVOCATION, not the word "curl" appearing in the
+        # apt-get package list. An earlier version of this test failed on the
+        # package name and proved nothing.
+        import re as _re
+        assert not _re.search(r"curl\s+-[a-zA-Z]*f", df), \
+            "no curl download should remain in the Dockerfile"
+        assert "releases/download" not in df, \
+            "the Dockerfile must not fetch anything from a release CDN"
+        # The install step must copy from the vendored directory.
+        assert "docker/vendor/s6-overlay" in df, "vendored s6-overlay not referenced"
+        assert "sha256sum -c" in df, "vendored tarballs must be checksum-verified"
+
+        vendor = os.path.join(REPO_ROOT, "docker", "vendor", "s6-overlay")
+        for f in ["s6-overlay-noarch.tar.xz", "s6-overlay-x86_64.tar.xz",
+                  "s6-overlay-aarch64.tar.xz", "s6-overlay-symlinks-noarch.tar.xz",
+                  "SHA256SUMS", "README.md"]:
+            assert os.path.isfile(os.path.join(vendor, f)), f"missing vendored file {f}"
+
+    def test_vendored_s6_checksums_match_the_files(self):
+        """A checksum file that does not match its payload fails the build at
+        image time, which is the worst place to find out."""
+        import hashlib
+        vendor = os.path.join(REPO_ROOT, "docker", "vendor", "s6-overlay")
+        with open(os.path.join(vendor, "SHA256SUMS")) as f:
+            lines = [ln.split() for ln in f if ln.strip()]
+        assert lines, "SHA256SUMS is empty"
+        for digest, name in lines:
+            path = os.path.join(vendor, name)
+            assert os.path.isfile(path), f"SHA256SUMS names a missing file: {name}"
+            actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            assert actual == digest, f"{name} does not match its recorded checksum"
+
     def test_events_migration_sql_exists(self):
         assert os.path.isfile(os.path.join(REPO_ROOT, "scripts", "supabase_events_migration.sql"))
 

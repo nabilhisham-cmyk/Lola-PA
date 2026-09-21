@@ -32,3 +32,7 @@ docker/entrypoint.sh text eol=lf
 *.html  text eol=lf
 *.svg   text eol=lf
 *.ps1   text eol=crlf
+
+# Vendored third-party binaries — never text-diff these.
+docker/vendor/**/*.tar.xz binary
+docker/vendor/**/*.tar.gz binary
