@@ -320,6 +320,16 @@ display:
   platforms:
     telegram:
       streaming: true
+      # Hisham's chat is a mobile inbox, not a terminal. The global
+      # display.tool_progress below is "all", and a global value OUTRANKS the
+      # per-platform default in resolve_display_setting()
+      # (platforms.<name>.<key> -> display.<key> -> _PLATFORM_DEFAULTS -> _GLOBAL_DEFAULTS),
+      # so Hermes's own telegram default of "off" never applied and every tool
+      # call — terminal commands included — was rendered into the chat.
+      # Setting it here, in the highest-precedence slot, restores that intent
+      # while leaving the CLI verbose.
+      tool_progress: 'off'
+      busy_ack_detail: false
     discord:
       streaming: false
   runtime_footer:
@@ -333,7 +343,11 @@ display:
   cleanup_progress: false
   long_running_notifications: true
   busy_ack_detail: true
-  background_process_notifications: all
+  # "all" posts running updates AND the final RAW output of every
+  # terminal(background=true) process into the chat, which is the second half of
+  # the command spam. "concise" is the shipped default: one line, with an output
+  # tail only when the process fails.
+  background_process_notifications: concise
 dashboard:
   theme: default
   show_token_analytics: false
