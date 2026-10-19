@@ -11,7 +11,7 @@
 # with only home_mode overridden for Railway (sed in Stage 1).
 # ──────────────────────────────────────────────────────────────────────────
 
-ARG HERMES_REF=b5b8a4cd56cb75a563d8b40d998676b695748e64
+ARG HERMES_REF=5fc490e2b34123212d73ef316086f939567a725a
 
 # ── Stage 1: Prepare source tree (clone Hermes + overlay custom configs) ───
 # HERMES_REF can be a branch name, tag, or commit SHA.
